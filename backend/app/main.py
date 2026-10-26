@@ -1,4 +1,4 @@
-"""Aplicación FastAPI. En Vercel la expone api/index.py; en local, `make dev`."""
+"""Aplicación FastAPI: servicio `backend` en Vercel (ver vercel.json); en local, `make dev`."""
 
 from typing import Any
 

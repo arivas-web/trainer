@@ -1,29 +1,26 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": null,
-  "installCommand": "cd frontend && npm ci",
-  "buildCommand": "cd frontend && npm run build",
-  "outputDirectory": "frontend/dist",
-  "regions": [
-    "fra1"
-  ],
-  "functions": {
-    "api/index.py": {
-      "maxDuration": 60,
-      "includeFiles": "backend/{app/**,alembic/**,alembic.ini}",
-      "excludeFiles": "{frontend/**,backend/tests/**,backend/.venv/**,data/**}"
+  "services": {
+    "backend": {
+      "root": "backend",
+      "framework": "fastapi"
+    },
+    "frontend": {
+      "root": "frontend",
+      "framework": "vite"
     }
   },
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/api/index"
+      "destination": { "service": "backend" }
     },
     {
-      "source": "/((?!api/).*)",
-      "destination": "/index.html"
+      "source": "/(.*)",
+      "destination": { "service": "frontend" }
     }
   ],
+  "regions": ["fra1"],
   "crons": [
     {
       "path": "/api/sync/tick",

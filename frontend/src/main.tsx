@@ -21,8 +21,9 @@ createRoot(root).render(
       <AuthGate>
         <BrowserRouter>
           <Routes>
-            <Route path="/sync" element={<SyncPage />} />
-            <Route path="*" element={<Navigate to="/sync" replace />} />
+            {/* De momento todo cuelga de "/": así recargar nunca da 404 en Vercel. */}
+            <Route path="/" element={<SyncPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>
       </AuthGate>

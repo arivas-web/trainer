@@ -10,8 +10,8 @@ predicciones y recuperación, con la explicación de cada número.
 
 | Pieza | Dónde |
 |---|---|
-| Frontend (Vite + React + TS + Tailwind) | Vercel (estático) |
-| API (FastAPI, Python 3.12) | Vercel, función `api/index.py` |
+| Frontend (Vite + React + TS + Tailwind) | Vercel, servicio `frontend` (ruta `/`) |
+| API (FastAPI, Python 3.12) | Vercel, servicio `backend` (ruta `/api`) |
 | Base de datos (Postgres) + login (Auth) + FIT originales (Storage) | Supabase (UE) |
 | Sincronización automática | Vercel Cron diario → `/api/sync/tick` (opcional: `pg_cron` cada 10 min) |
 | Datos | Garmin Connect **Personal API** (clave API personal) + importación FIT/GPX/TCX/zip |

@@ -5,7 +5,7 @@ FRONTEND := cd frontend &&
 PY := uv run
 
 .PHONY: help setup db-up db-down migrate dev sync summary probe token-check import \
-        test lint format requirements schema-sql key
+        test lint format schema-sql key
 
 help: ## Muestra esta ayuda
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -49,20 +49,13 @@ test: ## Tests de backend y build de frontend
 	$(BACKEND) $(PY) pytest
 	$(FRONTEND) npm run build
 
-lint: ## ruff + mypy + eslint + prettier + tsc, y requirements.txt al día
+lint: ## ruff + mypy + eslint + prettier + tsc
 	$(BACKEND) $(PY) ruff check . && $(PY) ruff format --check . && $(PY) mypy app
 	$(FRONTEND) npm run lint && npm run typecheck
-	@$(BACKEND) uv export --no-dev --no-hashes --no-emit-project --quiet -o ../requirements.txt.check \
-	  && cd .. && (diff -q <(grep -v '^#' requirements.txt) <(grep -v '^#' requirements.txt.check) >/dev/null \
-	  || (echo "requirements.txt desactualizado: make requirements"; rm requirements.txt.check; exit 1)) \
-	  && rm requirements.txt.check
 
 format: ## Formatea backend y frontend
 	$(BACKEND) $(PY) ruff format . && $(PY) ruff check --fix .
 	$(FRONTEND) npm run format
-
-requirements: ## Regenera requirements.txt (lo usa Vercel) desde backend/uv.lock
-	$(BACKEND) uv export --no-dev --no-hashes --no-emit-project --quiet -o ../requirements.txt
 
 schema-sql: ## Regenera supabase/01_schema.sql (esquema para pegar en Supabase)
 	@{ echo "-- Pulse · esquema completo (GENERADO con \`make schema-sql\`; no editar a mano)."; \

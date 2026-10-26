@@ -10,7 +10,13 @@ Los valores secretos solo van en Vercel. Nunca los pegues en el chat ni en el re
 1. Entra en <https://vercel.com/new>.
 2. En *Import Git Repository*, elige **arivas-web/trainer**.
    Si no aparece: *Adjust GitHub App Permissions* → dale acceso a ese repo.
-3. *Framework Preset*: **Other**. No cambies nada más: los comandos están en `vercel.json`.
+3. Vercel dirá *Multiple applications detected* y mostrará **dos servicios**, que ya están
+   configurados en `vercel.json`:
+   - `backend` (FastAPI), público en `/api`;
+   - `frontend` (Vite), público en `/`.
+
+   Elige importarlos **como un solo proyecto con Services** (no como proyectos separados) y no
+   cambies nada más.
 4. Pulsa **Deploy** y espera 2–3 min.
 5. Abre la URL que te da (`https://trainer-xxxx.vercel.app`). Verás **Puesta a punto** con ✗ en rojo. Es lo esperado.
 
