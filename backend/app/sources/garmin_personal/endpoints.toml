@@ -1,0 +1,84 @@
+# Mapeo declarativo de la Garmin Connect Personal API.
+#
+# REGLA: aquí solo entran rutas y campos verificados contra el OpenAPI oficial y contra
+# respuestas reales (`make probe`). Un tipo sin `path` queda desactivado y aparece como
+# "no configurado" en el resumen de sincronización; nunca rompe la app.
+#
+# Campos de cada [kinds.<nombre>]:
+#   path          ruta relativa a GARMIN_API_BASE ("{id}" se sustituye en activity_file)
+#   start_param   nombre del parámetro de inicio del rango
+#   end_param     nombre del parámetro de fin del rango
+#   date_format   "iso-date" (YYYY-MM-DD) | "epoch-s" | "epoch-ms"
+#   max_days      tamaño máximo del rango por petición
+#   items_path    ruta con puntos hasta la lista de registros dentro de la respuesta ("" = raíz)
+#   key_field     campo que identifica el registro (id o fecha)
+#   page          [opcional] { start_param, size_param, size }
+#   [kinds.<nombre>.fields]   columna_de_daily_metrics = "ruta.en.el.json" (o {path, scale})
+#   date_field    campo con la fecha de calendario del registro (tipos diarios)
+
+[auth]
+# Confirmado por Adrián desde la documentación oficial:
+#   POST .../personal-api-key/token   con   Authorization: ApiKey <clave>
+# PENDIENTE de verificar: cómo se envía el token a los endpoints de datos.
+data_auth_header = "Authorization"
+data_auth_template = "Bearer {token}"
+
+[kinds.activities]
+path = ""            # PENDIENTE (OpenAPI)
+start_param = ""
+end_param = ""
+date_format = "iso-date"
+max_days = 28
+items_path = ""
+key_field = ""
+
+[kinds.activity_file]
+path = ""            # PENDIENTE (OpenAPI): descarga del FIT original
+
+[kinds.daily_summary]
+path = ""            # PENDIENTE
+date_format = "iso-date"
+max_days = 28
+date_field = ""
+
+[kinds.sleep]
+path = ""            # PENDIENTE
+date_format = "iso-date"
+max_days = 31
+date_field = ""
+
+[kinds.hrv]
+path = ""            # PENDIENTE
+date_format = "iso-date"
+max_days = 28
+date_field = ""
+
+[kinds.stress]
+path = ""            # PENDIENTE (incluye Body Battery según algunas fuentes)
+date_format = "iso-date"
+max_days = 28
+date_field = ""
+
+[kinds.body_composition]
+path = ""            # PENDIENTE
+date_format = "iso-date"
+max_days = 28
+date_field = ""
+
+[kinds.spo2]
+path = ""            # PENDIENTE
+date_format = "iso-date"
+max_days = 28
+date_field = ""
+
+[kinds.respiration]
+path = ""            # PENDIENTE
+date_format = "iso-date"
+max_days = 28
+date_field = ""
+
+[kinds.user_metrics]
+path = ""            # PENDIENTE (VO2max / fitness age, si existe)
+date_format = "iso-date"
+max_days = 28
+date_field = ""
