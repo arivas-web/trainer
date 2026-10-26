@@ -20,6 +20,9 @@ Estado: **pendiente de OK de Adrián**. No hay código todavía.
 Es el nuevo nivel gratuito y de autoservicio del Garmin Connect Developer Program (octubre de 2026), pensado para usar **tus propios datos**. Según fuentes secundarias, a falta de verificarlo contra la especificación oficial:
 
 - **Pull, solo lectura.** Nosotros pedimos los datos: **no hacen falta webhooks** y desaparece toda la parte de push/ping de la v2.
+- **Canje de token (confirmado por Adrián desde la documentación oficial):**
+  `POST https://personal.connectapi.garmin.com/personalapitoken-service/personal-api/personal-api-key/token`
+  con la cabecera `Authorization: ApiKey <clave>`. Pendiente: la forma exacta de la respuesta y la cabecera con la que se envía el token a los endpoints de datos.
 - **Autenticación:** la clave personal se canjea por un access token OAuth2 que dura **24 h** y no tiene refresh token. El backend guarda la clave (variable de entorno cifrada en Vercel) y renueva el token cuando caduca.
 - **Contenido:** actividades (resumen, búsqueda, detalle y **descarga del FIT original**), sueño, HRV, Body Battery, SpO2, estrés, pasos, peso, Fitness Age y zonas de FC. Hay una especificación OpenAPI oficial (≈ 26 endpoints, todos GET).
 - **Límites de rango por petición** (secundario): estrés y pasos ≤ 28 días, sueño ≤ 31 días, resúmenes diarios hasta 1 año. Los rate limits no están publicados → pausa configurable + backoff ante 429/5xx, como pedía la especificación.
