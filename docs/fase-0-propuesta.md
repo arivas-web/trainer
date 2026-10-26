@@ -70,7 +70,7 @@ pulse/
 
 ## 4. Esquema (Postgres)
 
-Igual que en la v1, con estos cambios: `user_id` en las tablas de datos (por la RLS, aunque seas un solo usuario), `garmin_token` (access token cacheado + caducidad; la clave vive en env) y `sync_jobs` (cola + progreso).
+Igual que en la v1, con estos cambios (implementado en la Fase 1): **sin `user_id`**: todas las tablas tienen RLS activado sin políticas, así que solo el backend (conexión directa) accede a los datos y la clave pública de Supabase solo sirve para el login; `garmin_token` (access token cacheado + caducidad; la clave vive en env) y `sync_jobs` (cola + progreso).
 
 ```
 activities           id, user_id, source, external_id, UNIQUE(source, external_id),

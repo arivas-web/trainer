@@ -158,7 +158,7 @@ def sync(
     typer.echo("")
     for e in st["errors"]:
         typer.echo(f"  ⚠ {e}")
-    summary()
+    summary(as_json=False)
 
 
 @cli.command()

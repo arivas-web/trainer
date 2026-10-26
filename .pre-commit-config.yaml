@@ -1,0 +1,27 @@
+# pre-commit install  →  ejecuta los mismos checks que `make lint` antes de cada commit.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff (backend)
+        entry: bash -c 'cd backend && uv run ruff check . && uv run ruff format --check .'
+        language: system
+        pass_filenames: false
+        files: ^backend/
+      - id: mypy
+        name: mypy (backend)
+        entry: bash -c 'cd backend && uv run mypy app'
+        language: system
+        pass_filenames: false
+        files: ^backend/
+      - id: frontend
+        name: eslint + prettier + tsc (frontend)
+        entry: bash -c 'cd frontend && npm run lint && npm run typecheck'
+        language: system
+        pass_filenames: false
+        files: ^frontend/
+      - id: no-secrets-env
+        name: no subir .env
+        entry: bash -c 'git diff --cached --name-only | grep -E "(^|/)\.env(\.local)?$" && exit 1 || exit 0'
+        language: system
+        pass_filenames: false
