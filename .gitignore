@@ -1,0 +1,33 @@
+# Secretos y datos personales: nunca al repo
+.env
+.env.*
+!.env.example
+data/
+*.sqlite
+*.sqlite-*
+*.db
+*.fit
+*.FIT
+garmin_tokens.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+.vite/
+playwright-report/
+test-results/
+
+# Editor / SO
+.DS_Store
+.idea/
+.vscode/
