@@ -1,4 +1,4 @@
-"""Aplicación FastAPI: servicio `backend` en Vercel (ver vercel.json); en local, `make dev`."""
+"""Aplicación FastAPI: proyecto `backend` en Vercel (raíz backend/); en local, `make dev`."""
 
 from typing import Any
 
@@ -22,15 +22,24 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
+# La web (otro proyecto de Vercel) llama a esta API desde otro dominio. La autenticación va
+# en la cabecera Authorization (no hay cookies), así que permitir cualquier origen no expone
+# nada: sin un JWT válido de tu usuario, la API responde 401.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(sync.router)
 app.include_router(garmin.router)
+
+
+@app.get("/")
+def root() -> dict[str, str]:
+    return {"app": "Pulse API", "health": "/api/health", "docs": "/api/docs"}
 
 
 @app.get("/api/health")

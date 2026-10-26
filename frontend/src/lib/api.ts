@@ -1,3 +1,4 @@
+import { API_BASE } from './config'
 import { accessToken } from './supabase'
 
 export class ApiError extends Error {
@@ -13,7 +14,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = await accessToken()
   const headers = new Headers(init.headers)
   if (token) headers.set('Authorization', `Bearer ${token}`)
-  const res = await fetch(path, { ...init, headers })
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers })
   if (!res.ok) {
     let detail = res.statusText
     try {

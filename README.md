@@ -10,8 +10,8 @@ predicciones y recuperación, con la explicación de cada número.
 
 | Pieza | Dónde |
 |---|---|
-| Frontend (Vite + React + TS + Tailwind) | Vercel, servicio `frontend` (ruta `/`) |
-| API (FastAPI, Python 3.12) | Vercel, servicio `backend` (ruta `/api`) |
+| Frontend (Vite + React + TS + Tailwind) | Proyecto de Vercel con raíz `frontend/` (`VITE_API_URL` → API) |
+| API (FastAPI, Python 3.12) | Proyecto de Vercel con raíz `backend/` |
 | Base de datos (Postgres) + login (Auth) + FIT originales (Storage) | Supabase (UE) |
 | Sincronización automática | Vercel Cron diario → `/api/sync/tick` (opcional: `pg_cron` cada 10 min) |
 | Datos | Garmin Connect **Personal API** (clave API personal) + importación FIT/GPX/TCX/zip |
@@ -22,8 +22,9 @@ para el login; los datos solo los lee el backend.
 ## Despliegue (Vercel + Supabase)
 
 Guía paso a paso, solo con el navegador: **[docs/guia-despliegue.md](docs/guia-despliegue.md)**.
-En resumen: importar el repo en Vercel, conectar Supabase desde *Storage*, añadir
-`GARMIN_PERSONAL_API_KEY`, `ALLOWED_EMAIL` y `CRON_SECRET`, y Redeploy. Las tablas se crean
+En resumen: dos proyectos de Vercel del mismo repo (`backend/` y `frontend/`), Supabase
+conectado al backend desde *Storage*, `GARMIN_PERSONAL_API_KEY`, `ALLOWED_EMAIL` y
+`CRON_SECRET` en el backend, y `VITE_API_URL` en el frontend. Las tablas se crean
 solas en el primer arranque; si falta algo, la app lo dice en la pantalla de *Puesta a punto*.
 
 ## Desarrollo local

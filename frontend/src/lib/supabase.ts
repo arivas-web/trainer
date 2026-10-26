@@ -1,5 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
+import { API_BASE } from './config'
+
 export interface PublicConfig {
   supabase_url: string | null
   supabase_anon_key: string | null
@@ -11,7 +13,7 @@ let client: SupabaseClient | null = null
 /** El backend sirve la URL y la clave pública de Supabase en /api/config, así que no hacen
  *  falta variables VITE_* en el build (ni redeploy al cambiarlas). */
 export async function loadConfig(): Promise<PublicConfig> {
-  const res = await fetch('/api/config')
+  const res = await fetch(`${API_BASE}/api/config`)
   if (!res.ok) throw new Error(`No se pudo leer /api/config (HTTP ${res.status})`)
   const cfg = (await res.json()) as PublicConfig
   if (cfg.supabase_url && cfg.supabase_anon_key && !client) {

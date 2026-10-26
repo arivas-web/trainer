@@ -1,6 +1,7 @@
 import type { Session } from '@supabase/supabase-js'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 
+import { API_BASE, API_BASE_MISSING } from '@/lib/config'
 import { loadConfig, supabase, type PublicConfig } from '@/lib/supabase'
 
 interface Health {
@@ -34,8 +35,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     let unsub: (() => void) | undefined
     void (async () => {
+      if (API_BASE_MISSING) {
+        setState({
+          kind: 'setup',
+          health: null,
+          error:
+            'Falta VITE_API_URL en el proyecto frontend de Vercel (la URL del proyecto backend). Añádela y haz Redeploy.',
+        })
+        return
+      }
       try {
-        const health = (await (await fetch('/api/health')).json()) as Health
+        const health = (await (await fetch(`${API_BASE}/api/health`)).json()) as Health
         if (!health.ok) {
           setState({ kind: 'setup', health })
           return
