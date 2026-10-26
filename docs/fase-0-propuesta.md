@@ -1,4 +1,4 @@
-# Pulse — Fase 0: propuesta de arquitectura, esquema y plan (v2)
+# Pulse — Fase 0: propuesta de arquitectura, esquema y plan (v3)
 
 Estado: **pendiente de OK de Adrián**. No hay código todavía.
 
@@ -6,7 +6,7 @@ Estado: **pendiente de OK de Adrián**. No hay código todavía.
 
 | Tema | Decisión |
 |---|---|
-| Acceso a Garmin | **Garmin Connect Developer Program** (Health API + Activity API oficiales, push/ping a webhooks) |
+| Acceso a Garmin | **Garmin Connect Personal API** (clave API personal, creada el 26/10/2026, caduca el 26/10/2027) |
 | Reloj | Forerunner 165: FC óptica de muñeca, potencia de carrera de muñeca |
 | Objetivo A | Media maratón Vig-Bay, **11/04/2027**, sub-1h45 |
 | 70.3 | Sin carrera fijada: el estimador funciona sin fecha y sin cuenta atrás (configurable cuando la haya) |
@@ -15,45 +15,36 @@ Estado: **pendiente de OK de Adrián**. No hay código todavía.
 | TRIMP | Factor de hombre (1,92) |
 | Histórico inicial | 12 meses |
 
-## 1. Lo que cambia respecto a la especificación original
+## 1. Garmin Personal API: qué es y cómo encaja
 
-La especificación decía "local y privado, SQLite, PIN en `.env`". Con Vercel + Supabase:
+Es el nuevo nivel gratuito y de autoservicio del Garmin Connect Developer Program (octubre de 2026), pensado para usar **tus propios datos**. Según fuentes secundarias, a falta de verificarlo contra la especificación oficial:
+
+- **Pull, solo lectura.** Nosotros pedimos los datos: **no hacen falta webhooks** y desaparece toda la parte de push/ping de la v2.
+- **Autenticación:** la clave personal se canjea por un access token OAuth2 que dura **24 h** y no tiene refresh token. El backend guarda la clave (variable de entorno cifrada en Vercel) y renueva el token cuando caduca.
+- **Contenido:** actividades (resumen, búsqueda, detalle y **descarga del FIT original**), sueño, HRV, Body Battery, SpO2, estrés, pasos, peso, Fitness Age y zonas de FC. Hay una especificación OpenAPI oficial (≈ 26 endpoints, todos GET).
+- **Límites de rango por petición** (secundario): estrés y pasos ≤ 28 días, sueño ≤ 31 días, resúmenes diarios hasta 1 año. Los rate limits no están publicados → pausa configurable + backoff ante 429/5xx, como pedía la especificación.
+- **Campos recortados:** se ha publicado que Garmin elimina de los FIT servidos por API campos no documentados (estimación de VO2max, tiempo de recuperación, performance condition). Si se confirma, el VO2max de Garmin se mostrará como "sin datos" y quedará el VO2max propio estimado desde el VDOT.
+- **Caducidad de la clave:** 1 año. Pulse avisará 30 días antes en Ajustes e Insights.
+
+**Lo que probablemente no esté** (se confirma con la especificación y con `make probe`): Training Readiness, Training Status, Race Predictor de Garmin, Endurance/Hill Score, récords de Garmin, material y clima. Sustitutos: readiness propio; predicciones Riegel + VDOT + velocidad crítica; récords calculados desde los streams; zapatillas gestionadas a mano en Pulse con reglas de asignación; temperatura del FIT + Open-Meteo opcional.
+
+**Seguridad:** la clave **nunca** se pega en el chat ni en el repo. Va solo en las variables de entorno de Vercel (`GARMIN_PERSONAL_API_KEY`) y en tu `.env.local` para desarrollo.
+
+## 2. Cambios respecto a la especificación original por usar Vercel + Supabase
 
 | Original | Nuevo | Por qué |
 |---|---|---|
 | SQLite (WAL) | **Postgres de Supabase** desde el primer día | Vercel no tiene disco persistente. Alembic sigue gestionando las migraciones. |
-| FastAPI en tu máquina | **FastAPI como función Python en Vercel** (`api/index.py`, ASGI) | Vercel ejecuta FastAPI de forma nativa. La analítica (numpy/scipy) cabe en el límite de 250 MB del bundle. |
-| APScheduler | **`pg_cron` + `pg_net` de Supabase**, que llaman a un endpoint protegido de Vercel | El scheduler en proceso no sobrevive en serverless. Vercel Cron en el plan Hobby solo se ejecuta 1 vez al día. |
-| PIN en `.env` | **Supabase Auth** (magic link a tu email) + RLS en todas las tablas + lista blanca con un solo usuario | Ahora la app está en internet y un PIN no basta. |
-| FIT originales en `data/` | **Supabase Storage** (bucket privado) | Mismo motivo. |
-| Subida de FIT/zip por la API | Subida **directa del navegador a Storage** con URL firmada, y después procesado | Vercel limita el cuerpo de las peticiones a 4,5 MB. Un export completo de Garmin (que pesa GB) se importa con un CLI local que escribe en Supabase. |
-| SSE para el progreso | Progreso en la tabla `sync_jobs` + **Supabase Realtime** (o polling) | Las funciones serverless no mantienen conexiones largas. |
-| "Ningún dato sale salvo hacia Garmin" | Los datos viven en Supabase (proyecto en región **UE**, Frankfurt) y se procesan en Vercel (región `fra1`) | Lo asumes al elegir alojamiento. Te lo dejo explícito. |
+| FastAPI local | **FastAPI como función Python en Vercel** | Vercel ejecuta FastAPI de forma nativa. Numpy y scipy caben en el bundle. |
+| APScheduler | **`pg_cron` + `pg_net` de Supabase**, que llaman a `/api/sync/tick` (protegido con un secreto) | En serverless no hay proceso persistente, y el cron de Vercel Hobby solo se ejecuta 1 vez al día. |
+| Sync de 12 meses en una llamada | **Cola de trabajos `sync_jobs`** troceada en rangos de ≤ 28 días; cada tick procesa unos cuantos trozos | Las funciones de Vercel tienen tiempo máximo de ejecución. Es reanudable si algo falla. |
+| PIN en `.env` | **Supabase Auth** (magic link a tu email) + RLS + lista blanca con un solo usuario | La app está en internet. |
+| FIT en `data/` | **Supabase Storage** (bucket privado) | Mismo motivo. |
+| Subida de FIT/zip por la API | FIT sueltos: subida directa del navegador a Storage. Export zip completo: CLI local `make import` | Límite de 4,5 MB por petición en Vercel. |
+| SSE | Progreso en `sync_jobs` + Supabase Realtime (o polling) | Serverless no mantiene conexiones largas. |
+| "Ningún dato sale salvo hacia Garmin" | Los datos viven en Supabase y Vercel, ambos en la **UE** (Frankfurt) | Lo asumes al elegir alojamiento. |
 
-## 2. Garmin Developer Program: realidad y huecos
-
-**Cómo funciona.** Garmin no se consulta: Garmin **avisa**. Tras el OAuth con tu cuenta, cada vez que el reloj sincroniza, Garmin hace un POST a nuestros webhooks.
-
-- Usaré el modo **ping/pull** siempre que el portal lo permita: llega un aviso con un `callbackURL`, nosotros pedimos los datos con nuestro token y guardamos la respuesta cruda. Esto evita el límite de 4,5 MB de Vercel con `activityDetails` grandes y verifica que la petición es legítima. Hasta donde sé, Garmin no firma los webhooks.
-- **Backfill de 12 meses:** la API de backfill es asíncrona. Se pide un rango y los datos llegan después por los mismos webhooks. Hay límites por rango y por día, así que lo trocearé y lo encolaré.
-- Obligatorio en el programa: atender `deregistrations` y `userPermissionsChange`.
-
-**Lo que la API oficial NO da (hasta donde sé; lo confirmo contra tu portal).** Estos datos se mostrarán como "sin datos" o los calcularé yo:
-
-| Dato de la especificación | Situación con la API oficial | Alternativa |
-|---|---|---|
-| Training Readiness, Training Status | No disponible. Además, el FR165 probablemente no lo tiene. | Readiness propio (apartado 5.5), que era el plan de todas formas |
-| Race Predictor de Garmin | No disponible | Riegel + VDOT + velocidad crítica propios |
-| Endurance Score, Hill Score | No disponible | Se omite |
-| Récords de Garmin | No disponible | Récords calculados desde los streams (mejor de todas formas) |
-| Material (zapatillas) | No disponible | Gestión manual de zapatillas en Pulse + asignación por reglas (por ejemplo, "trail → zapatilla X") |
-| Clima de la actividad | No disponible | Temperatura del sensor del FIT si existe; opcional: Open-Meteo histórico por lat/lon y hora |
-| HRV, sueño, estrés, Body Battery, FC en reposo, VO2max, SpO2, respiración, composición corporal | **Sí** (Health API: dailies, sleeps, hrv, stressDetails, userMetrics, pulseOx, respiration, bodyComps) | — |
-| Streams (FC, ritmo, GPS, cadencia, potencia, altitud) | **Sí** (activityDetails y/o FIT de Activity Files) | Preferiré el FIT original, que es más rico (dinámica de carrera), con activityDetails de respaldo |
-
-**FR165:** la dinámica de carrera disponible solo desde la muñeca (cadencia y zancada seguro; tiempo de contacto y oscilación vertical, dudoso) y la potencia de muñeca se confirmarán con tus primeros FIT. Todo lo que falte se mostrará como "sin datos".
-
-**Importación FIT/GPX/TCX/zip:** sigue disponible como respaldo.
+Fuente alternativa `garminconnect` (no oficial): **descartada como principal**. Desde las IP de Vercel probablemente Garmin la bloquee, y la Personal API la hace innecesaria. Si a la Personal API le faltara algo crítico, podría añadirse como fuente secundaria opcional ejecutada en tu ordenador.
 
 ## 3. Arquitectura
 
@@ -61,7 +52,7 @@ La especificación decía "local y privado, SQLite, PIN en `.env`". Con Vercel +
 pulse/
 ├─ api/index.py              entrypoint de Vercel → backend.app.main:app
 ├─ backend/app/
-│  ├─ sources/               garmin_official.py (OAuth, webhooks, backfill), fit_import.py, base.py (GarminSource)
+│  ├─ sources/               garmin_personal.py (cliente generado desde el OpenAPI oficial), fit_import.py, base.py (GarminSource)
 │  ├─ sync/                  cola de trabajos (sync_jobs), workers idempotentes, re-sync de 3 días
 │  ├─ models/ analytics/ insights/ api/ core/
 │  └─ alembic/
@@ -72,11 +63,11 @@ pulse/
 └─ Makefile                  setup | dev | test | lint | migrate | import
 ```
 
-**Desarrollo local:** `make dev` levanta Postgres local (Supabase CLI o Docker) + uvicorn + Vite. Los webhooks de Garmin en local se prueban con cloudflared (lo documento), pero lo normal será probarlos directamente en un Preview Deploy de Vercel.
+**Desarrollo local:** `make dev` levanta Postgres local (Supabase CLI o Docker) + uvicorn + Vite, con la clave en `.env.local`.
 
 ## 4. Esquema (Postgres)
 
-Igual que en la v1, con estos cambios: `user_id` en las tablas de datos (por la RLS, aunque seas un solo usuario), `garmin_oauth` (tokens cifrados y garmin_user_id), `sync_jobs` (cola + progreso) y `webhook_events` (registro idempotente de cada aviso recibido).
+Igual que en la v1, con estos cambios: `user_id` en las tablas de datos (por la RLS, aunque seas un solo usuario), `garmin_token` (access token cacheado + caducidad; la clave vive en env) y `sync_jobs` (cola + progreso).
 
 ```
 activities           id, user_id, source, external_id, UNIQUE(source, external_id),
@@ -93,15 +84,14 @@ daily_metrics · daily_load (ctl, atl, tsb, acwr, ramp, monotony, strain)
 gear (manual) · athlete_thresholds (effective_from) · app_settings
 races · goals · insights · ai_reports · planned_workouts (fase final)
 raw_documents        kind, key, payload jsonb (o comprimido en Storage si es grande)
-garmin_oauth         user_id, garmin_user_id, tokens (cifrados con una clave en env), scopes, connected_at
-webhook_events       id, type, received_at, payload, status, error  (idempotencia + depuración)
+garmin_token         access_token (cifrado), expires_at, key_expires_at
 sync_jobs            id, kind (backfill|pull|recompute), range, status, progress, error
 sync_state · sync_log
 ```
 
 ## 5. Plan de fases (ajustado)
 
-- **F1 — Esqueleto y sincronización** 🛑: monorepo, Vercel + Supabase, migraciones, auth, OAuth de Garmin, webhooks, backfill de 12 meses troceado, importación FIT y resumen de lo recibido (n.º de actividades por deporte, rango de fechas, qué tipos de datos llegan y cuáles no). Tests con payloads de ejemplo.
+- **F1 — Esqueleto y sincronización** 🛑: monorepo, Vercel + Supabase, migraciones, auth, cliente de la Personal API generado desde su OpenAPI, `make probe`, sync incremental + backfill de 12 meses troceado, importación FIT y resumen de lo recibido (n.º de actividades por deporte, rango de fechas, qué tipos de datos llegan y cuáles no). Tests con payloads de ejemplo.
 - **F2 — Analítica** 🛑 · **F3 — Diseño** 🛑 · **F4 — Vistas principales** 🛑 · **F5 — Secundarias, PWA, ⌘K** 🛑 · **F6 — IA y pulido**. Sin cambios respecto a tu especificación, salvo que el acceso móvil ya no es "misma wifi + PIN" sino la URL de Vercel con login.
 
 Decisiones defendibles que ya tomo (configurables): GAP con Minetti (2002); ACWR por EWMA; zonas de FC Friel por % de LTHR; TRIMP de Banister con factor 1,92; velocidad crítica por ajuste lineal distancia–tiempo con esfuerzos de 3 a 20 min.
