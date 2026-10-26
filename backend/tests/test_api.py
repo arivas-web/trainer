@@ -1,4 +1,6 @@
+import httpx
 import pytest
+import respx
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
@@ -13,7 +15,25 @@ def client() -> TestClient:
 
 def test_health(client: TestClient) -> None:
     body = client.get("/api/health").json()
-    assert body["ok"] and body["garmin_key_configured"]
+    assert body["checks"]["database"] and body["checks"]["garmin_key"]
+    assert body["ok"] is False  # faltan SUPABASE_URL y la clave anon
+    assert "test-key" not in str(body)
+
+
+def test_public_config(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NEXT_PUBLIC_SUPABASE_URL", "https://abc.supabase.co")
+    monkeypatch.setenv("SUPABASE_ANON_KEY", "anon")
+    get_settings.cache_clear()
+    assert client.get("/api/config").json() == {
+        "supabase_url": "https://abc.supabase.co",
+        "supabase_anon_key": "anon",
+        "auth_disabled": True,
+    }
+
+
+def test_vercel_cron_bearer(client: TestClient) -> None:
+    r = client.get("/api/sync/tick", headers={"Authorization": "Bearer test-cron"})
+    assert r.status_code == 200
 
 
 def test_import_and_summary(client: TestClient) -> None:
@@ -74,3 +94,28 @@ def test_jwt_hs256_allowed_email(client: TestClient, monkeypatch: pytest.MonkeyP
     assert ok.status_code == 200
     other = client.get("/api/me", headers={"Authorization": f"Bearer {tok('otro@x.com')}"})
     assert other.status_code == 403
+
+
+@respx.mock
+def test_garmin_check_ok_hides_token(client: TestClient) -> None:
+    respx.post(get_settings().garmin_token_url).mock(
+        return_value=httpx.Response(200, json={"access_token": "SECRETO", "expires_in": 86400})
+    )
+    body = client.get("/api/garmin/check").json()
+    assert body["ok"] is True
+    assert body["response_shape"] == {"access_token": "str", "expires_in": "int"}
+    assert "SECRETO" not in str(body)
+
+
+@respx.mock
+def test_garmin_check_rejected(client: TestClient) -> None:
+    respx.post(get_settings().garmin_token_url).mock(return_value=httpx.Response(401, json={}))
+    body = client.get("/api/garmin/check").json()
+    assert body["ok"] is False and body["http_status"] == 401
+
+
+def test_token_cache_encrypts_with_derived_key() -> None:
+    from app.core import crypto
+
+    enc = crypto.encrypt("token-123")
+    assert "token-123" not in enc and crypto.decrypt(enc) == "token-123"

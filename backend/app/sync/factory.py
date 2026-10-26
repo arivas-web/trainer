@@ -4,6 +4,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 import httpx
+from cryptography.fernet import InvalidToken
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -37,7 +38,10 @@ def _db_token_cache(
             if row is None:
                 return None
             exp = row.expires_at if row.expires_at.tzinfo else row.expires_at.replace(tzinfo=UTC)
-            return AccessToken(crypto.decrypt(row.access_token_enc), exp)
+            try:
+                return AccessToken(crypto.decrypt(row.access_token_enc), exp)
+            except InvalidToken:  # la clave cambió: se pedirá un token nuevo
+                return None
 
     def store(token: AccessToken) -> None:
         if not crypto.can_encrypt():

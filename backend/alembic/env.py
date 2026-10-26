@@ -11,7 +11,7 @@ from app.core.config import get_settings
 from app.models.base import Base
 
 config = context.config
-if config.config_file_name is not None:
+if config.config_file_name is not None and not config.attributes.get("skip_logging_config"):
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
@@ -33,6 +33,12 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    provided = config.attributes.get("connection")
+    if provided is not None:  # app.core.bootstrap pasa su conexión (con el lock tomado)
+        context.configure(connection=provided, target_metadata=target_metadata, compare_type=True)
+        with context.begin_transaction():
+            context.run_migrations()
+        return
     url = _url()
     connect_args = {} if url.startswith("sqlite") else {"prepare_threshold": None}
     engine = create_engine(url, poolclass=NullPool, connect_args=connect_args)

@@ -19,6 +19,9 @@ def _env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("CRON_SECRET", "test-cron")
     monkeypatch.setenv("GARMIN_PERSONAL_API_KEY", "test-key")
     monkeypatch.setenv("SYNC_PAUSE_S", "0")
+    monkeypatch.setenv("AUTO_MIGRATE", "false")  # los tests crean el esquema con create_all
+    for var in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "POSTGRES_URL", "VERCEL"):
+        monkeypatch.delenv(var, raising=False)
     for f in (get_settings, get_engine, get_sessionmaker):
         f.cache_clear()
     Base.metadata.create_all(get_engine())

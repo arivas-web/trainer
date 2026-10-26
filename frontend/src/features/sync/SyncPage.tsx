@@ -47,8 +47,8 @@ export function SyncPage() {
           <img src="/favicon.svg" alt="" className="size-9" />
           <h1 className="text-2xl font-semibold">Sincronización</h1>
         </div>
-        {supabase && (
-          <button onClick={() => void supabase?.auth.signOut()} className="text-sm text-ink-soft">
+        {supabase() && (
+          <button onClick={() => void supabase()?.auth.signOut()} className="text-sm text-ink-soft">
             Salir
           </button>
         )}
@@ -89,6 +89,7 @@ export function SyncPage() {
         ))}
       </section>
 
+      <GarminCheck />
       {summary.data && <SummaryView s={summary.data} />}
       <ImportCard onDone={() => void qc.invalidateQueries({ queryKey: ['sync-summary'] })} />
     </main>
@@ -217,6 +218,62 @@ function ImportCard({ onDone }: { onDone: () => void }) {
         </p>
       )}
       {error && <p className="text-sm text-bad">{error}</p>}
+    </section>
+  )
+}
+
+interface GarminCheckResult {
+  ok: boolean
+  step?: string
+  error?: string
+  http_status?: number
+  response_shape?: unknown
+  token_expires_at?: string
+}
+
+/** Comprueba la clave API personal desde la web y muestra la forma de la respuesta. */
+function GarminCheck() {
+  const check = useMutation({
+    mutationFn: () => api.get<GarminCheckResult>('/api/garmin/check'),
+  })
+  const r = check.data
+  return (
+    <section className="glass space-y-3 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="label">Conexión con Garmin</p>
+          <p className="text-sm text-ink-soft">
+            Canjea tu clave API personal por un token de 24 h.
+          </p>
+        </div>
+        <button
+          onClick={() => check.mutate()}
+          disabled={check.isPending}
+          className="rounded-full border border-accent px-5 py-2.5 font-medium text-accent disabled:opacity-50"
+        >
+          {check.isPending ? 'Comprobando…' : 'Comprobar conexión'}
+        </button>
+      </div>
+      {check.error && <p className="text-sm text-bad">{check.error.message}</p>}
+      {r && (
+        <div className="space-y-2 text-sm">
+          <p className={r.ok ? 'text-ok' : 'text-bad'}>
+            {r.ok
+              ? `✓ Conectado. El token caduca el ${day(r.token_expires_at)}.`
+              : `✗ ${r.error ?? 'Error'}${r.http_status ? ` (HTTP ${r.http_status})` : ''}`}
+          </p>
+          {r.response_shape !== undefined && (
+            <>
+              <p className="text-ink-soft">
+                Forma de la respuesta (sin valores, se puede compartir):
+              </p>
+              <pre className="overflow-x-auto rounded-2xl bg-white/70 p-3 text-xs">
+                {JSON.stringify(r.response_shape, null, 2)}
+              </pre>
+            </>
+          )}
+        </div>
+      )}
     </section>
   )
 }

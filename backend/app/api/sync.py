@@ -65,7 +65,7 @@ def continue_sync(_user: User, settings: Settings = Depends(get_settings)) -> di
     return {"processed": res.processed, "failed": res.failed, "remaining": res.remaining}
 
 
-@router.post("/sync/tick", dependencies=[Depends(require_cron)])
+@router.api_route("/sync/tick", methods=["GET", "POST"], dependencies=[Depends(require_cron)])
 def cron_tick(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
     """Llamado por pg_cron (cabecera X-Cron-Secret) cada pocos minutos.
     Avanza la cola si hay trabajo pendiente; si no, y han pasado SYNC_AUTO_INTERVAL_H horas

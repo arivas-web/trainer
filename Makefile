@@ -5,7 +5,7 @@ FRONTEND := cd frontend &&
 PY := uv run
 
 .PHONY: help setup db-up db-down migrate dev sync summary probe token-check import \
-        test lint format requirements key
+        test lint format requirements schema-sql key
 
 help: ## Muestra esta ayuda
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -14,7 +14,6 @@ setup: ## Instala dependencias (uv + npm) y crea .env.local si no existe
 	$(BACKEND) uv sync
 	$(FRONTEND) npm ci
 	@test -f .env.local || (cp .env.example .env.local && echo "Creado .env.local: rellénalo")
-	@test -f frontend/.env.local || cp frontend/.env.example frontend/.env.local
 
 db-up: ## Postgres local en Docker (puerto 5432)
 	docker run -d --name pulse-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=pulse \
@@ -64,6 +63,11 @@ format: ## Formatea backend y frontend
 
 requirements: ## Regenera requirements.txt (lo usa Vercel) desde backend/uv.lock
 	$(BACKEND) uv export --no-dev --no-hashes --no-emit-project --quiet -o ../requirements.txt
+
+schema-sql: ## Regenera supabase/01_schema.sql (esquema para pegar en Supabase)
+	@{ echo "-- Pulse · esquema completo (GENERADO con \`make schema-sql\`; no editar a mano)."; \
+	  echo "-- Pégalo entero en Supabase → SQL Editor → Run. Equivale a \`make migrate\`."; echo; \
+	  cd backend && DATABASE_URL=postgresql+psycopg://x@localhost/x $(PY) alembic upgrade head --sql 2>/dev/null; } > supabase/01_schema.sql
 
 key: ## Genera una clave aleatoria (TOKEN_ENCRYPTION_KEY / CRON_SECRET)
 	@$(BACKEND) $(PY) python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"

@@ -46,6 +46,10 @@ def get_sessionmaker() -> sessionmaker[Session]:
 
 @contextmanager
 def session_scope() -> Iterator[Session]:
+    """Sesión transaccional. La primera del proceso aplica las migraciones pendientes."""
+    from app.core.bootstrap import ensure_schema
+
+    ensure_schema()
     session = get_sessionmaker()()
     try:
         yield session

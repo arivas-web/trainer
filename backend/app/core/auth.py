@@ -58,10 +58,15 @@ def require_user(
 
 def require_cron(
     x_cron_secret: Annotated[str | None, Header()] = None,
+    authorization: Annotated[str | None, Header()] = None,
     settings: Settings = Depends(get_settings),
 ) -> None:
+    """pg_cron envía `X-Cron-Secret`; Vercel Cron envía `Authorization: Bearer <CRON_SECRET>`."""
     expected = settings.cron_secret.get_secret_value() if settings.cron_secret else None
-    if not expected or not x_cron_secret or not hmac.compare_digest(x_cron_secret, expected):
+    given = x_cron_secret
+    if given is None and authorization and authorization.lower().startswith("bearer "):
+        given = authorization.split(" ", 1)[1]
+    if not expected or not given or not hmac.compare_digest(given, expected):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Secreto de cron no válido")
 
 

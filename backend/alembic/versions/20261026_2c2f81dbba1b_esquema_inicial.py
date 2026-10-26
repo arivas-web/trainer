@@ -488,11 +488,33 @@ def upgrade() -> None:
     # Supabase expone las tablas de "public" por PostgREST a las claves anon/authenticated.
     # Activamos RLS SIN políticas: nadie salvo el backend (conexión directa como postgres)
     # puede leer o escribir. El frontend solo habla con la API de FastAPI.
-    if op.get_bind().dialect.name == "postgresql":
-        for table in sa.inspect(op.get_bind()).get_table_names():
-            if table != "alembic_version":
-                op.execute(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY')
-        op.execute("ALTER TABLE alembic_version ENABLE ROW LEVEL SECURITY")
+    # Lista explícita (no inspección) para que también funcione en modo offline (--sql).
+    if op.get_context().dialect.name == "postgresql":
+        for table in [
+            "ai_reports",
+            "app_settings",
+            "athlete_thresholds",
+            "daily_load",
+            "daily_metrics",
+            "garmin_token",
+            "gear",
+            "goals",
+            "insights",
+            "raw_documents",
+            "sync_jobs",
+            "sync_log",
+            "sync_state",
+            "activities",
+            "activity_streams",
+            "best_efforts",
+            "computed_activity_metrics",
+            "laps",
+            "personal_records",
+            "races",
+            "swim_lengths",
+            "alembic_version",
+        ]:
+            op.execute(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY')
 
 
 def downgrade() -> None:

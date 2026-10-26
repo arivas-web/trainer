@@ -1,5 +1,5 @@
 -- Pulse · configuración de Supabase (ejecutar UNA vez en el SQL Editor del proyecto,
--- DESPUÉS de `make migrate` y de desplegar en Vercel).
+-- DESPUÉS de 01_schema.sql y de desplegar en Vercel).
 -- Sustituye los dos marcadores <...> antes de ejecutar. No guardes este archivo con
 -- valores reales en el repo.
 

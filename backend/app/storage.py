@@ -38,17 +38,34 @@ class LocalStorage:
 
 class SupabaseStorage:
     def __init__(self, url: str, service_key: str, bucket: str) -> None:
-        self.base = f"{url.rstrip('/')}/storage/v1/object/{bucket}"
+        self.root = url.rstrip("/")
+        self.bucket = bucket
+        self.base = f"{self.root}/storage/v1/object/{bucket}"
         self.headers = {"Authorization": f"Bearer {service_key}", "apikey": service_key}
 
     def put(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> None:
+        for attempt in range(2):
+            resp = httpx.post(
+                f"{self.base}/{key}",
+                content=data,
+                headers={**self.headers, "Content-Type": content_type, "x-upsert": "true"},
+                timeout=60,
+            )
+            if attempt == 0 and resp.status_code in (400, 404) and "not found" in resp.text.lower():
+                self._create_bucket()  # primer uso: el bucket privado aún no existe
+                continue
+            resp.raise_for_status()
+            return
+
+    def _create_bucket(self) -> None:
         resp = httpx.post(
-            f"{self.base}/{key}",
-            content=data,
-            headers={**self.headers, "Content-Type": content_type, "x-upsert": "true"},
-            timeout=60,
+            f"{self.root}/storage/v1/bucket",
+            json={"id": self.bucket, "name": self.bucket, "public": False},
+            headers=self.headers,
+            timeout=30,
         )
-        resp.raise_for_status()
+        if resp.status_code not in (200, 201, 409):
+            resp.raise_for_status()
 
     def get(self, key: str) -> bytes | None:
         resp = httpx.get(f"{self.base}/{key}", headers=self.headers, timeout=60)
@@ -60,7 +77,7 @@ class SupabaseStorage:
 
 def get_storage(settings: Settings | None = None) -> FileStorage:
     s = settings or get_settings()
-    if s.storage_backend == "supabase":
+    if s.effective_storage == "supabase":
         if not (s.supabase_url and s.supabase_service_role_key):
             raise RuntimeError(
                 "STORAGE_BACKEND=supabase requiere SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY"

@@ -1,16 +1,33 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+export interface PublicConfig {
+  supabase_url: string | null
+  supabase_anon_key: string | null
+  auth_disabled: boolean
+}
 
-export const authDisabled = import.meta.env.VITE_AUTH_DISABLED === 'true'
+let client: SupabaseClient | null = null
 
-/** Cliente de Supabase solo para el login (los datos se piden a la API de Pulse). */
-export const supabase: SupabaseClient | null =
-  url && anonKey ? createClient(url, anonKey, { auth: { persistSession: true } }) : null
+/** El backend sirve la URL y la clave pública de Supabase en /api/config, así que no hacen
+ *  falta variables VITE_* en el build (ni redeploy al cambiarlas). */
+export async function loadConfig(): Promise<PublicConfig> {
+  const res = await fetch('/api/config')
+  if (!res.ok) throw new Error(`No se pudo leer /api/config (HTTP ${res.status})`)
+  const cfg = (await res.json()) as PublicConfig
+  if (cfg.supabase_url && cfg.supabase_anon_key && !client) {
+    client = createClient(cfg.supabase_url, cfg.supabase_anon_key, {
+      auth: { persistSession: true, detectSessionInUrl: true },
+    })
+  }
+  return cfg
+}
+
+export function supabase(): SupabaseClient | null {
+  return client
+}
 
 export async function accessToken(): Promise<string | null> {
-  if (!supabase) return null
-  const { data } = await supabase.auth.getSession()
+  if (!client) return null
+  const { data } = await client.auth.getSession()
   return data.session?.access_token ?? null
 }
