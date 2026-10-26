@@ -1,97 +1,121 @@
-# Pulse — Fase 0: propuesta de esquema y plan
+# Pulse — Fase 0: propuesta de arquitectura, esquema y plan (v2)
 
 Estado: **pendiente de OK de Adrián**. No hay código todavía.
 
-## 1. Cosas de la especificación que chocan con la realidad (octubre de 2026)
+## 0. Decisiones confirmadas
 
-| Punto de la especificación | Realidad | Propuesta |
+| Tema | Decisión |
+|---|---|
+| Acceso a Garmin | **Garmin Connect Developer Program** (Health API + Activity API oficiales, push/ping a webhooks) |
+| Reloj | Forerunner 165: FC óptica de muñeca, potencia de carrera de muñeca |
+| Objetivo A | Media maratón Vig-Bay, **11/04/2027**, sub-1h45 |
+| 70.3 | Sin carrera fijada: el estimador funciona sin fecha y sin cuenta atrás (configurable cuando la haya) |
+| Despliegue | **Vercel + Supabase** (web, no local) |
+| Umbrales | Con historial (`athlete_thresholds.effective_from`) |
+| TRIMP | Factor de hombre (1,92) |
+| Histórico inicial | 12 meses |
+
+## 1. Lo que cambia respecto a la especificación original
+
+La especificación decía "local y privado, SQLite, PIN en `.env`". Con Vercel + Supabase:
+
+| Original | Nuevo | Por qué |
 |---|---|---|
-| Tokens con `garth` en `~/.garminconnect` | `garth` está **deprecado**: Garmin cambió el flujo de autenticación y los logins nuevos con garth ya no funcionan. `garminconnect` ≥ 0.3.0 ya no lo usa: hace login por SSO móvil (OAuth Bearer con refresh automático) y guarda los tokens en `~/.garminconnect/garmin_tokens.json` (modo 0600). Última versión: 0.3.20 (23/10/2026). Python ≥ 3.12. | Fijar `garminconnect>=0.3.20,<0.4`. El MFA se resuelve por consola con `prompt_mfa`, y también por la UI con `return_on_mfa=True` + `resume_login()`. Nunca por debajo de 0.3.5 (CVE sobre los permisos del archivo de tokens). |
-| Modo B: API oficial (Developer Program) | Es un programa para **empresas**: exige solicitud y aprobación y, en la práctica, no se concede para uso personal. Hay noticias de septiembre de 2026 de que Garmin ha congelado las altas nuevas. | Lo dejo como adaptador "stub" detrás de `GarminSource` (interfaz y mapeo documentados), pero no lo construyo entero salvo que ya tengas credenciales aprobadas. |
-| Nombres de endpoints | Los de la lista existen en versiones recientes, pero los nombres y las formas de respuesta cambian entre versiones. | En la Fase 1 hago un script `make probe` que llama a cada método, guarda la respuesta cruda (anonimizada) y genera una tabla de lo que existe para tu cuenta y tu reloj. El mapeo se escribe contra esas respuestas, no de memoria. |
-| Desarrollo con tus datos | Trabajo en un contenedor en la nube, **no en tu máquina**. No debo recibir tus credenciales, y Garmin suele bloquear las IP de centros de datos. | El login y la sincronización real los ejecutas tú en local (`make sync`). Yo desarrollo y testeo contra fixtures. Para el checkpoint de la Fase 1, me pegas la salida del resumen de `make sync` y, si quieres, el `make probe --anonymize` para afinar el mapeo. |
+| SQLite (WAL) | **Postgres de Supabase** desde el primer día | Vercel no tiene disco persistente. Alembic sigue gestionando las migraciones. |
+| FastAPI en tu máquina | **FastAPI como función Python en Vercel** (`api/index.py`, ASGI) | Vercel ejecuta FastAPI de forma nativa. La analítica (numpy/scipy) cabe en el límite de 250 MB del bundle. |
+| APScheduler | **`pg_cron` + `pg_net` de Supabase**, que llaman a un endpoint protegido de Vercel | El scheduler en proceso no sobrevive en serverless. Vercel Cron en el plan Hobby solo se ejecuta 1 vez al día. |
+| PIN en `.env` | **Supabase Auth** (magic link a tu email) + RLS en todas las tablas + lista blanca con un solo usuario | Ahora la app está en internet y un PIN no basta. |
+| FIT originales en `data/` | **Supabase Storage** (bucket privado) | Mismo motivo. |
+| Subida de FIT/zip por la API | Subida **directa del navegador a Storage** con URL firmada, y después procesado | Vercel limita el cuerpo de las peticiones a 4,5 MB. Un export completo de Garmin (que pesa GB) se importa con un CLI local que escribe en Supabase. |
+| SSE para el progreso | Progreso en la tabla `sync_jobs` + **Supabase Realtime** (o polling) | Las funciones serverless no mantienen conexiones largas. |
+| "Ningún dato sale salvo hacia Garmin" | Los datos viven en Supabase (proyecto en región **UE**, Frankfurt) y se procesan en Vercel (región `fra1`) | Lo asumes al elegir alojamiento. Te lo dejo explícito. |
 
-## 2. Esquema de base de datos propuesto
+## 2. Garmin Developer Program: realidad y huecos
 
-Cambios respecto a la especificación, con una línea de justificación cada uno:
+**Cómo funciona.** Garmin no se consulta: Garmin **avisa**. Tras el OAuth con tu cuenta, cada vez que el reloj sincroniza, Garmin hace un POST a nuestros webhooks.
 
-1. **`raw_documents` aparte** en lugar de `raw_json` en cada fila. Las respuestas crudas comprimidas (zlib) por `(kind, key)` permiten re-mapear sin volver a descargar y mantienen ligeras las tablas calientes.
-2. **Umbrales con historial (`athlete_thresholds`)**: tu LTHR, ritmo umbral, FC máx, CSS y FTP cambian con el tiempo. Calcular un rodaje de hace 10 meses con el LTHR de hoy distorsiona el TSS y el CTL. Cada actividad usa los umbrales vigentes en su fecha. *(Decisión tuya: ver las preguntas.)*
-3. **`best_efforts` como tabla** y no como JSON: el ranking histórico y el de 90 días se resuelven con un `ORDER BY` indexado.
-4. **`swim_lengths` separado de `laps`**: un largo no es un lap. SWOLF y brazadas viven por largo.
-5. **Streams**: una fila por actividad, un BLOB por canal (float32 → zlib). Es portable a Postgres (`bytea`) sin Parquet ni pyarrow, y solo se carga en el detalle.
-6. **Invalidación**: `computed_activity_metrics.inputs_hash` = hash de (umbrales vigentes + zonas + método de carga + versión del algoritmo). Si cambia, se recalcula.
-7. **Overrides manuales** (`is_race`, `is_trail`, `excluded_from_analytics`, `rpe`, `notes`) en columnas propias que la sincronización **nunca** pisa.
+- Usaré el modo **ping/pull** siempre que el portal lo permita: llega un aviso con un `callbackURL`, nosotros pedimos los datos con nuestro token y guardamos la respuesta cruda. Esto evita el límite de 4,5 MB de Vercel con `activityDetails` grandes y verifica que la petición es legítima. Hasta donde sé, Garmin no firma los webhooks.
+- **Backfill de 12 meses:** la API de backfill es asíncrona. Se pide un rango y los datos llegan después por los mismos webhooks. Hay límites por rango y por día, así que lo trocearé y lo encolaré.
+- Obligatorio en el programa: atender `deregistrations` y `userPermissionsChange`.
+
+**Lo que la API oficial NO da (hasta donde sé; lo confirmo contra tu portal).** Estos datos se mostrarán como "sin datos" o los calcularé yo:
+
+| Dato de la especificación | Situación con la API oficial | Alternativa |
+|---|---|---|
+| Training Readiness, Training Status | No disponible. Además, el FR165 probablemente no lo tiene. | Readiness propio (apartado 5.5), que era el plan de todas formas |
+| Race Predictor de Garmin | No disponible | Riegel + VDOT + velocidad crítica propios |
+| Endurance Score, Hill Score | No disponible | Se omite |
+| Récords de Garmin | No disponible | Récords calculados desde los streams (mejor de todas formas) |
+| Material (zapatillas) | No disponible | Gestión manual de zapatillas en Pulse + asignación por reglas (por ejemplo, "trail → zapatilla X") |
+| Clima de la actividad | No disponible | Temperatura del sensor del FIT si existe; opcional: Open-Meteo histórico por lat/lon y hora |
+| HRV, sueño, estrés, Body Battery, FC en reposo, VO2max, SpO2, respiración, composición corporal | **Sí** (Health API: dailies, sleeps, hrv, stressDetails, userMetrics, pulseOx, respiration, bodyComps) | — |
+| Streams (FC, ritmo, GPS, cadencia, potencia, altitud) | **Sí** (activityDetails y/o FIT de Activity Files) | Preferiré el FIT original, que es más rico (dinámica de carrera), con activityDetails de respaldo |
+
+**FR165:** la dinámica de carrera disponible solo desde la muñeca (cadencia y zancada seguro; tiempo de contacto y oscilación vertical, dudoso) y la potencia de muñeca se confirmarán con tus primeros FIT. Todo lo que falte se mostrará como "sin datos".
+
+**Importación FIT/GPX/TCX/zip:** sigue disponible como respaldo.
+
+## 3. Arquitectura
 
 ```
-activities
-  id PK, source, external_id, UNIQUE(source, external_id)
-  start_time_utc, start_time_local, tz_offset_min
-  sport, sub_sport, name, device
-  distance_m, duration_s, moving_s, elev_gain_m, elev_loss_m
-  avg_hr, max_hr, avg_speed, max_speed, avg_cadence
-  avg_power, max_power, normalized_power
-  aerobic_te, anaerobic_te, garmin_training_load, vo2max, calories
-  avg_temp_c, weather_json, gear_id FK
-  has_streams, has_power, has_running_dynamics
-  is_race, is_trail (auto + override), excluded_from_analytics, rpe, notes
-  INDEX(start_time_utc), INDEX(sport, start_time_utc)
-
-activity_streams
-  activity_id PK/FK, n_samples, channels (lista), data (BLOB por canal: time, distance,
-  lat, lon, altitude, hr, speed, cadence, power, temperature, gct, vo, stride_length,
-  vertical_ratio), schema_version
-
-laps          activity_id, idx, start_offset_s, duration_s, distance_m, avg_speed, avg_hr,
-              max_hr, avg_cadence, avg_power, elev_gain_m, elev_loss_m, intensity (active|rest)
-swim_lengths  activity_id, lap_idx, idx, duration_s, stroke_type, strokes, swolf, pool_length_m
-
-computed_activity_metrics
-  activity_id PK, inputs_hash, algo_version, computed_at
-  load_value, load_method (power_tss|rtss|hrtss|trimp|garmin)
-  trimp, hrtss, rtss, tss_power, intensity_factor
-  gap_avg_speed, efficiency_factor, decoupling_pct, hr_drift_pct
-  pace_at_hr_json ({140: s/km, 150: …}), zone_time_json (hr/pace/power, 5 y 3 zonas)
-  vam_m_h, walk_pct (trail)
-
-best_efforts   activity_id, sport, kind (distance|duration), target (m o s), value (s o m),
-               start_offset_s, date — INDEX(sport, kind, target, value)
-personal_records  sport, kind, target, value, activity_id, date, source (garmin|computed)
-
-daily_metrics  date PK, resting_hr, hrv_night_avg, hrv_weekly_avg, hrv_status,
-               sleep_total_s, sleep_deep_s, sleep_light_s, sleep_rem_s, sleep_awake_s,
-               sleep_score, sleep_start_local, sleep_end_local,
-               body_battery_max/min/charged/drained, stress_avg, steps, active_kcal,
-               readiness_score, readiness_factors_json, vo2max_run, vo2max_bike,
-               training_status, acute_load, chronic_load, respiration_avg, spo2_avg,
-               weight_kg, body_fat_pct, fetched_at
-daily_load     date PK, load_total, load_by_sport_json, ctl, atl, tsb, acwr,
-               ramp_rate_7d, monotony_7d, strain_7d, inputs_hash
-
-gear           id PK, external_id, name, type (shoes|bike|other), total_km, limit_km (700),
-               retired, first_used, last_used
-athlete_thresholds  id, effective_from, hr_max, hr_rest, lthr, threshold_pace_s_km,
-                    css_s_100m, ftp_w, weight_kg, source (manual|auto_estimated|garmin)
-app_settings   key PK, value_json (zonas, métodos de carga, constantes CTL/ATL, pesos de
-               readiness, Riegel, objetivos de sueño, IA on/off, intervalos de sync…)
-races          id, name, date, distance_m, format (run|tri_70_3|trail…), target_time_s,
-               priority (A|B|C), result_activity_id
-goals          id, type (weekly_volume|milestone|metric), sport, target_value, unit,
-               period, deadline, achieved_at
-insights       id, rule_id, date, severity, title, body, evidence_json, dismissed
-ai_reports     id, week_start, model, payload_sent_json, response_md, created_at
-planned_workouts (fase final)
-raw_documents  kind, key, fetched_at, payload (zlib) — UNIQUE(kind, key)
-sync_state     data_type PK, last_synced_at, last_cursor
-sync_log       id, run_id, started_at, data_type, method, params_json, status, http_code,
-               items, error, duration_ms
+pulse/
+├─ api/index.py              entrypoint de Vercel → backend.app.main:app
+├─ backend/app/
+│  ├─ sources/               garmin_official.py (OAuth, webhooks, backfill), fit_import.py, base.py (GarminSource)
+│  ├─ sync/                  cola de trabajos (sync_jobs), workers idempotentes, re-sync de 3 días
+│  ├─ models/ analytics/ insights/ api/ core/
+│  └─ alembic/
+├─ frontend/                 Vite + React 18 + TS + Tailwind (build estático servido por Vercel)
+├─ supabase/                 config, políticas RLS, pg_cron (SQL versionado)
+├─ scripts/import_export.py  CLI local para el zip completo de Garmin
+├─ vercel.json
+└─ Makefile                  setup | dev | test | lint | migrate | import
 ```
 
-## 3. Plan de fases (el tuyo, con lo que añado)
+**Desarrollo local:** `make dev` levanta Postgres local (Supabase CLI o Docker) + uvicorn + Vite. Los webhooks de Garmin en local se prueban con cloudflared (lo documento), pero lo normal será probarlos directamente en un Preview Deploy de Vercel.
 
-- **F1 — Esqueleto y sincronización** 🛑. Monorepo, Makefile, `.env.example`, Alembic, `GarminSource` (A real, B stub, importación FIT/GPX/TCX/zip), `make probe`, sync incremental (12 meses al principio, re-sync de los últimos 3 días, backoff, pausa de 0,4 s, `sync_log`), progreso por SSE y resumen por consola. Tests con fixtures.
-- **F2 — Analítica** 🛑. Todo el apartado 5 como funciones puras + tests + `/api/debug/activity/{id}` y `/api/debug/week/{date}`.
-- **F3 — Sistema de diseño** 🛑. Tokens, glass, layout y página de muestra. La publicaré como vista previa para que la valides en el móvil.
-- **F4 — Vistas principales** 🛑. **F5 — Secundarias, PWA, PIN, ⌘K** 🛑. **F6 — IA y pulido**.
+## 4. Esquema (Postgres)
 
-Decisiones defendibles que ya tomo (configurables): GAP con el modelo de Minetti (2002), con la pendiente suavizada y acotada a ±45 %, porque está publicado y es reproducible (el de Strava no lo está del todo). ACWR por EWMA (Williams 2017). Zonas de FC Friel por % de LTHR. TRIMP de Banister con factor por sexo. Velocidad crítica por ajuste lineal distancia–tiempo con esfuerzos de 3 a 20 min.
+Igual que en la v1, con estos cambios: `user_id` en las tablas de datos (por la RLS, aunque seas un solo usuario), `garmin_oauth` (tokens cifrados y garmin_user_id), `sync_jobs` (cola + progreso) y `webhook_events` (registro idempotente de cada aviso recibido).
+
+```
+activities           id, user_id, source, external_id, UNIQUE(source, external_id),
+                     start_time_utc, start_time_local, tz_offset_min, sport, sub_sport, name, device,
+                     distance_m, duration_s, moving_s, elev_gain_m, elev_loss_m, avg/max_hr,
+                     avg/max_speed, avg_cadence, avg/max/normalized_power, aerobic_te, anaerobic_te,
+                     garmin_training_load, vo2max, calories, avg_temp_c, weather_json, gear_id,
+                     has_streams, has_power, has_running_dynamics,
+                     is_race, is_trail, excluded_from_analytics, rpe, notes   ← manuales, la sync no los pisa
+activity_streams     activity_id, n_samples, channels, data bytea (float32 por canal + zlib)
+laps · swim_lengths · best_efforts · personal_records
+computed_activity_metrics (inputs_hash, algo_version, load_method, …)
+daily_metrics · daily_load (ctl, atl, tsb, acwr, ramp, monotony, strain)
+gear (manual) · athlete_thresholds (effective_from) · app_settings
+races · goals · insights · ai_reports · planned_workouts (fase final)
+raw_documents        kind, key, payload jsonb (o comprimido en Storage si es grande)
+garmin_oauth         user_id, garmin_user_id, tokens (cifrados con una clave en env), scopes, connected_at
+webhook_events       id, type, received_at, payload, status, error  (idempotencia + depuración)
+sync_jobs            id, kind (backfill|pull|recompute), range, status, progress, error
+sync_state · sync_log
+```
+
+## 5. Plan de fases (ajustado)
+
+- **F1 — Esqueleto y sincronización** 🛑: monorepo, Vercel + Supabase, migraciones, auth, OAuth de Garmin, webhooks, backfill de 12 meses troceado, importación FIT y resumen de lo recibido (n.º de actividades por deporte, rango de fechas, qué tipos de datos llegan y cuáles no). Tests con payloads de ejemplo.
+- **F2 — Analítica** 🛑 · **F3 — Diseño** 🛑 · **F4 — Vistas principales** 🛑 · **F5 — Secundarias, PWA, ⌘K** 🛑 · **F6 — IA y pulido**. Sin cambios respecto a tu especificación, salvo que el acceso móvil ya no es "misma wifi + PIN" sino la URL de Vercel con login.
+
+Decisiones defendibles que ya tomo (configurables): GAP con Minetti (2002); ACWR por EWMA; zonas de FC Friel por % de LTHR; TRIMP de Banister con factor 1,92; velocidad crítica por ajuste lineal distancia–tiempo con esfuerzos de 3 a 20 min.
+
+## 6. Referencia visual (imagen que mandó Adrián)
+
+La referencia es un glassmorphism **claro**, distinto del apartado 8 de la especificación (oscuro `#07070C` con auroras). Rasgos que se toman de ella:
+
+- Fondo degradado celeste (de `#BFE3F7` a `#E6F3FB`) con manchas de luz grandes y suaves, en lugar de las auroras oscuras.
+- Tarjetas blancas translúcidas (`rgba(255,255,255,0.45–0.6)` + `blur(24px)`), borde blanco de 1 px, sombra azulada muy difusa y radio de unos 24 px.
+- Navegación doble: un rail de iconos estrecho + un panel de navegación con subsecciones en árbol. En el móvil se convierte en una tab bar inferior.
+- Etiquetas de sección en mayúsculas pequeñas con tracking amplio y gris azulado, y enlaces "Ver todo >" a la derecha.
+- KPI grande y oscuro con sparkline de color semántico y variación % en verde o rojo.
+- Pastillas con borde de color para los estados (Baja/Media → Z1–Z5, readiness, etc.).
+- Azul primario vivo (`#1A7CF5`) para los acentos y el elemento activo.
+
+Propuesta: **tema claro por defecto según la referencia** y tema oscuro "aurora" de la especificación como alternativa (con conmutador y respetando `prefers-color-scheme`). Ambos temas comparten tokens, así que el coste es bajo. Los colores por deporte y por zona se ajustan para mantener contraste AA sobre fondo claro.
